@@ -1,56 +1,59 @@
-# Food Hub One-Stop
+# Food Hub One-Stop Developer Documentation
 
-One-stop web app for food relief: connects **Patron** (recipients), **Provider** (hubs/staff), and **Supplier** (suppliers) with shared food data and automated pickup flow to reduce back-and-forth.
+## System Architecture
 
-## Roles
+This application is built using Next.js 15 (App Router) and TypeScript, utilizing a local filesystem-based data store. It is designed to facilitate food relief by connecting Patrons, Providers, and Suppliers through a shared inventory and automated pickup flow.
 
-| Role | Flow |
-|------|------|
-| **Patron** | Choose Provider → Add food to cart → Generate pickup QR Code → Show at hub to collect |
-| **Provider** | View pending orders at your hub → Enter order ID to confirm pickup → Inventory updates automatically |
-| **Supplier** | See each Provider’s inventory status (green / yellow / red), sorted by need for restock priority |
+### Data Management Layer
+* **Storage Strategy**: The application uses a local JSON file located at `data/foodhub.json` as the primary data store.
+* **Persistence Logic**: The `src/lib/db.ts` file handles all I/O operations using Node.js `fs` and `path` modules.
+* **Serverless Compatibility**: The system detects the `VERCEL` environment variable; if set to "1", it defaults to an in-memory `memoryStore` to bypass read-only filesystem restrictions.
+* **State Initialization**: Database initialization is managed via `initDb()`, which is called at the start of API requests to ensure the store is loaded.
 
-## Stack
-
-- **Next.js 15** (App Router) + **TypeScript** + **Tailwind CSS**
-- **JSON file store**: `data/foodhub.json` (no DB setup, runs on any Node version)
-- **QR Code**: `qrcode` for pickup codes
-
-## Quick start
-
-```bash
-# Install dependencies
-npm install
-
-# Seed sample hubs and inventory (optional; first visit also creates data/foodhub.json)
-npm run db:seed
-
-# Dev
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) and choose your role:
-
-- **Patron** → Pick hub → Add to cart → Generate pickup code
-- **Provider** → Pick hub → View orders → Enter order ID to confirm pickup
-- **Supplier** → View hub inventory status and restock priority
-
-## Data flow
-
-1. Patron places order → order and QR are created (order ID encoded in QR).
-2. Provider staff prepare items; Patron shows QR at hub; staff enter order ID and confirm pickup.
-3. Confirming pickup deducts that Provider’s inventory.
-4. Supplier sees real-time hub inventory and red/yellow/green status to prioritize restocking.
-
-The first visit or `npm run db:seed` creates `data/foodhub.json` with 3 sample hubs and 6 food types.
-
-## Project structure
-
-- `src/app/` — Home (role pick), `/patron`, `/provider`, `/supplier` pages
-- `src/app/api/` — Hub list, inventory, create order, confirm pickup, supplier inventory summary
-- `src/lib/db.ts` — JSON store and business logic
-- `src/lib/seed.ts` — Seed script
+### Core Data Models
+The system defines several TypeScript interfaces in `src/lib/db.ts`:
+* **Provider**: Represents a hub with an ID, name, and address.
+* **FoodItem**: Defines food products and their measurement units.
+* **ProviderInventoryRow**: Maps food items to specific providers with quantity and restock thresholds (`threshold_low`, `threshold_medium`).
+* **Order**: Tracks the lifecycle of a pickup request (`pending`, `prepared`, `picked_up`) and stores encoded QR data.
 
 ---
 
-UMN Tommie Buildfest 2026 · Inspired by inventory transparency and QR pickup ideas from [Food Insecurity Hackathon Data Strategy].
+## Technical Workflows
+
+### Order and Pickup Flow
+1.  **Creation**: The `createOrder` function validates stock levels against the provider's inventory before pushing a new order and its associated items to the store.
+2.  **QR Generation**: Orders generate a `qr_data` string containing the `orderId`, `providerId`, and a timestamp.
+3.  **Confirmation**: The `confirmPickup` function validates the order status and provider ID, then deducts the ordered quantities from the provider's inventory.
+
+### Supplier Inventory Monitoring
+The supplier interface performs real-time status aggregation:
+* **Priority Sorting**: Providers are sorted by urgency based on "red" (critical) and "yellow" (low) stock counts.
+* **Data Fetching**: The frontend uses client-side `useEffect` hooks to fetch data from `/api/supplier/inventory`.
+* **Polling**: To maintain up-to-date status, the interface implements a `setInterval` that refreshes the data every 10,000ms.
+
+---
+
+## Development Roadmap
+
+### Planned Feature: Inventory Check-In/Check-Out
+* **Database Extension**: Implement a function in `db.ts` to increment `ProviderInventoryRow.quantity` for restock events.
+* **OCR Integration**: Developers should integrate a library like Tesseract.js or a cloud-based Vision API to scan packing slips or labels to automate the check-in process.
+
+### Planned Feature: Navigation Integration
+* **Routing**: Leverage the `address` field in the `Provider` type to generate Google Maps deep links.
+* **Public Transit**: Implement the Google Maps JavaScript API to provide Patrons with real-time public transportation routes to their selected hub.
+
+---
+
+## Setup and Contribution
+
+### Local Environment Setup
+1.  **Install Dependencies**: Execute `npm install`.
+2.  **Seed Data**: Run `npm run db:seed`. This executes `src/lib/seed.ts`, which deletes any existing `foodhub.json` and recreates the sample dataset.
+3.  **Development Mode**: Run `npm run dev` to start the Next.js development server with Turbopack.
+
+### Coding Standards
+* **Logic Centralization**: All business logic affecting the data store (inventory updates, status calculations) must reside in `src/lib/db.ts`.
+* **Type Safety**: New data structures must be added to the `Store` type and initialized in `getSeedStore()`.
+* **API Handlers**: New endpoints should be placed in `src/app/api/` and must include `initDb()` calls to maintain data consistency.
