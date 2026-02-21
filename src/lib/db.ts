@@ -1,6 +1,10 @@
 import path from "path";
 import fs from "fs";
 
+// Vercel (and similar serverless) has a read-only filesystem — use in-memory store there.
+const isVercel = process.env.VERCEL === "1";
+let memoryStore: Store | null = null;
+
 const dataDir = path.join(process.cwd(), "data");
 const dbPath = path.join(dataDir, "foodhub.json");
 
@@ -33,25 +37,47 @@ type Store = {
 };
 
 function load(): Store {
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  if (!fs.existsSync(dbPath)) {
-    const seed = getSeedStore();
-    fs.writeFileSync(dbPath, JSON.stringify(seed, null, 2), "utf-8");
-    return seed;
+  if (isVercel) {
+    if (!memoryStore) memoryStore = getSeedStore();
+    return memoryStore;
   }
-  const raw = fs.readFileSync(dbPath, "utf-8");
-  return JSON.parse(raw) as Store;
+  try {
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    if (!fs.existsSync(dbPath)) {
+      const seed = getSeedStore();
+      try {
+        fs.writeFileSync(dbPath, JSON.stringify(seed, null, 2), "utf-8");
+      } catch {
+        memoryStore = seed;
+        return seed;
+      }
+      return seed;
+    }
+    const raw = fs.readFileSync(dbPath, "utf-8");
+    return JSON.parse(raw) as Store;
+  } catch {
+    if (!memoryStore) memoryStore = getSeedStore();
+    return memoryStore;
+  }
 }
 
 function save(store: Store) {
-  const toWrite = {
-    providers: store.providers,
-    food_items: store.food_items,
-    provider_inventory: store.provider_inventory.map(({ food_name, unit, ...r }) => r),
-    orders: store.orders,
-    order_items: store.order_items.map(({ food_name, ...r }) => r),
-  };
-  fs.writeFileSync(dbPath, JSON.stringify(toWrite, null, 2), "utf-8");
+  if (isVercel || memoryStore !== null) {
+    memoryStore = store;
+    return;
+  }
+  try {
+    const toWrite = {
+      providers: store.providers,
+      food_items: store.food_items,
+      provider_inventory: store.provider_inventory.map(({ food_name, unit, ...r }) => r),
+      orders: store.orders,
+      order_items: store.order_items.map(({ food_name, ...r }) => r),
+    };
+    fs.writeFileSync(dbPath, JSON.stringify(toWrite, null, 2), "utf-8");
+  } catch {
+    memoryStore = store;
+  }
 }
 
 function getSeedStore(): Store {
